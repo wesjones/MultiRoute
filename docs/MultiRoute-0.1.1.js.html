@@ -1,0 +1,2618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: MultiRoute-0.1.1.js</title>
+    
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+    
+    <h1 class="page-title">Source: MultiRoute-0.1.1.js</h1>
+    
+    
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source"><code>/**
+ * @overview
+ * @copyright 2012 Wes Jones http://www.codeguyz.com/
+ * @author Wes Jones
+ * @version 0.1.1
+ *
+ * @file MultiRoute to make angular nested hierarchical views with ease and
+ * have transitions already built in.
+ *
+ * @license Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * @example
+&lt;!--// and example of the html //-->
+ &lt;div data-ui-multiview data-target="page" data-transition="slide" class="viewport"&gt;&lt;/div&gt;
+ *
+ * @example
+// An example of a simple setup for registering your views.
+ angular.module('mr', ['ui.multiRoute']).
+ run(['$multiRoute', function ($multiRoute) {
+
+     // register the alias 'a' and setup it's template to load partials/a.html and initialize with controller
+     // CtrlA and automatically assign css class 'viewA' to the top level dom element in that view
+     // when it is loaded.
+     $multiRoute.register('a', {template:'partials/a.html', controller:'CtrlA', 'class':'viewA'});
+     //
+     $multiRoute.otherwise('/a');// url friendly
+     // set the pattern to match the multiView that is in the page.
+     $multiRoute.when('/:page');
+ }]);
+ *
+ */
+/*global window, ui */
+(function (ng, ldr) {
+    'use strict';
+    window.ui = window.ui || {};
+
+    var routeStatusLabel = {
+            1: 'waiting',
+            2: 'loading',
+            3: 'loaded',
+            4: 'entering',
+            5: 'ready'
+        },
+        $ = ng.element;
+
+    /*************************************************************************************************
+     * Setup the constants for MultiRoute.
+     * @exports multiRoute
+     *************************************************************************************************/
+    ui.multiRoute = {
+        /**
+         * @type {String}
+         * @const
+         */
+        VERSION: '0.1.1',
+        /**
+         * Items used for global configuration of MultiRoute.
+         * @readonly
+         * @exports ui.multiRoute.config
+         */
+        config: {
+            /**
+             * The separator that is used to separate routes in a full path.
+             * @type {String}
+             * @default
+             */
+            SEPARATOR: '/!',//url friendly.
+            /**
+             * @desc this it the transition time that it waits before executing the response handlers.
+             * For transitions to work correctly this needs to match the time of the transition in the
+             * css file. This currently matches the css in jquery.transtions.css
+             * @default
+             * @type {Number}
+             */
+            TRANSITION_TIME: 350,
+            /**
+             * Turn on an off debug logging.
+             * @type {Boolean}
+             * @default
+             */
+            LOG: true
+        },
+
+        /**
+         * Events that MultiRoute will emit from the view that is performing the action.
+         * @type {Object}
+         * @enum {String}
+         * @readonly
+         */
+        events: {
+            /**
+             * When the route has been changed in the url and is starting its loading
+             * and resolving. This will send back the currentPath and the previousPath
+             */
+            CHANGE: 'MultiRouteChange',
+            /**
+             * @desc Before the change happens. This is just before a route gets activated to be
+             * set for change. This will send back the currentPath and the nextPath
+             */
+            BEFORE_CHANGE: 'MultiRouteBeforeChange',
+            /**
+             * As each route completes this is dispatched from the view it completed in.
+             */
+            ROUTE_COMPLETE: 'MultiRouteQueueManagerRouteReady',
+            /**
+             * When the search params in the url change but the views have not, this will dispatch
+             * so that the views can fire their VIEW_READY event after these have been applied.
+             */
+            PARAMS_CHANGE: 'MultiRouteParamsChange',
+            /**
+             * After the view is ready, as in loaded, resolved, and transition is completed.
+             */
+            VIEW_READY: 'MultiRouteViewReady'
+        },
+
+        /**
+         * @desc The status phases that each path passed to the multiRoute will go through before the next
+         * path is able to begin it's phase cycle.
+         * @readonly
+         * @enum {Number}
+         */
+        routeStatus: {
+            /**
+             * Status of a path that is waiting in queue.
+             */
+            WAITING: 1,
+            /**
+             * The status of path that is in loading its dependencies.
+             */
+            LOADING: 2,
+            /**
+             * The status of a path that has loaded it's dependencies.
+             */
+            LOADED: 3,
+            /**
+             * The status of a path that is currently transitioning into view.
+             */
+            ENTERING: 4,
+            /**
+             * The status of a path that has finished all transitions.
+             */
+            READY: 5
+        },
+
+        /**
+         * @type {ui.multiRoute.MultiRoute}
+         * @return {MultiRoute}
+         * @constructs MultiRoute
+         */
+        MultiRoute: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteHistory: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteFilters: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteParser: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteQueue: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteQueueItem: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteView: null,
+
+        /**
+         * @type {Function}
+         * @private
+         */
+        MultiRouteViewUtil: null
+    };
+
+    /**
+     * Handle logging for this class only if in debug mode.
+     */
+    function log() {
+        if(ui.multiRoute.config.LOG) {
+            console.log.apply(console, arguments);
+        }
+    }
+
+    function warn() {
+        if(console && console.warn) {
+            console.warn.apply(console, arguments);
+        }
+    }
+
+    /**
+     * Handle logging for this class only if in debug mode.
+     */
+    function logError() {
+        if(ui.multiRoute.config.LOG) {
+            console.logError.apply(console, arguments);
+        }
+    }
+
+    /*************************************************************************************************
+     * @class MultiRoute
+     * @desc MultiRoute allows for multiple paths to be controlled and registered through the url so that
+     * those paths can be used anywhere in the app without adding custom logic to those section to load from
+     * search params in angular.
+     * @constructor ui.multiRoute.MultiRoute
+     ************************************************************************************************/
+    function MultiRoute(){ this.init.apply(this, arguments); return this; }
+    ui.multiRoute.MultiRoute = MultiRoute;
+    /** @lends MultiRoute.prototype */
+    MultiRoute.prototype = {
+        /**
+         * Name used in debugging outputs.
+         * @type {String}
+         * @private
+         */
+        _name: 'MultiRoute',
+
+        /**
+         * Weather or not to apply a wait before updating the route.
+         * Most cases this should be left off because browsers like IE and sometimes Android
+         * Need this wait to function properly.
+         * @type {Boolean=false}
+         */
+        synchronous: false,
+
+        /**
+         * When MultiRoute is initialized.
+         * @type {Boolean}
+         */
+        initialized: false,
+
+        /**
+         * Object used to keep what is registered to multiRoute as an alias.
+         * @dict
+         * @type {Object}
+         */
+        registered: null,
+
+        /**
+         * The groups that are registered to multiRoute.
+         * @dict
+         * @type {Object}
+         */
+        groups: null,
+
+        /**
+         * The patterns that are registered to MultiRoute to match against the url.
+         * @type {Array}
+         */
+        patterns: null,
+
+        /**
+         * Populated with the routes that are generated from a path in the url.
+         * dict
+         * @type {Object}
+         */
+        routes: null,
+
+        /**
+         * An optimization flag to know when to not parse routes from the URL because
+         * they ave already been parsed.
+         * @type {Object}
+         */
+        dirty: true,
+
+        /**
+         * @private
+         */
+        _lastParamStr: '',
+
+        /**
+         * If set to true, then the application will always return to the otherwise on a refresh.
+         * If not then it will go to the current path in the url if found.
+         * @type {Boolean=false}
+         */
+        startOnOtherwise: false,
+
+        /**
+         * Reference to the $rootScope
+         * @type {Object}
+         */
+        $rootScope: null,
+
+        /**
+         * Reference to the $location
+         * @type {Object}
+         */
+        $location: null,
+
+        /**
+         * @type {ui.multiRoute.MultiRouteHistory}
+         */
+        history: null,
+
+        /**
+         * @type {ui.multiRoute.MultiRouteQueue}
+         */
+        queue: null,
+
+        /**
+         * @type {ui.multiRoute.MultiRouteParser}
+         */
+        parser: null,
+
+        /**
+         * @type {ui.multiRoute.MultiRouteFilters}
+         */
+        filters: null,
+
+        /**
+         * The constructor
+         */
+        init: function() {
+            this.registered = {};
+            this.groups = {};
+            this.patterns = [];
+            this.routes = [];
+
+            this.history = new ui.multiRoute.MultiRouteHistory();
+            this.queue = new ui.multiRoute.MultiRouteQueue(this.history);
+            this.parser = new ui.multiRoute.MultiRouteParser();
+            this.filters = new ui.multiRoute.MultiRouteFilters();
+
+            // queue has a dependency on history because history cannot be calculated until the time to execute that
+            // path because otherwise the history has not yet been generated.
+            this.queue.history = this.history;
+            this.queue.onNext = this._processPath.bind(this);
+        },
+
+        /**
+         * @desc Register alias to an object of parameters.
+         * Parameters should have template and controller. class and preload are optional.
+         * @memberof MultiRoute#
+         * @param {String} alias the name of the reference
+         * @param {Object} params params such as template, controller, and preloads.
+         */
+        register: function (alias, params) {
+            params.alias = alias;
+            this._validateNameDoesNotAlreadyExist(alias);
+            this.registered[alias] = params;
+        },
+
+        /**
+         * @desc Group a url of aliases under a single name for keeping the url clean and tidy.
+         * @memberof MultiRoute#
+         * @param {String} name the name of the group
+         * @param {String} path the path of aliases that this group conceals.
+         * @return {*}
+         */
+        group: function(name, path) {
+            name = name.replace('/','');
+            this._validateNameDoesNotAlreadyExist(name);
+            this._validateGroupPatternDoesNotAlreadyExist(path);
+            if(arguments.length > 1) {
+                this.groups[name] = path;
+            }
+            return this.groups[name];
+        },
+
+        /**
+         * @desc Setup patterns that the aliases will be matched against to map them to their
+         * correct view.
+         * @memberof MultiRoute#
+         * @param {RegExp} pattern the pattern used to match against each route.
+         */
+        when: function (pattern) {
+            this.patterns.push(pattern.split('\\').join('\\\\').split('/').join('\\/'));
+        },
+
+        /**
+         * @desc Get an alias that is already registered.
+         * @memberof MultiRoute#
+         * @param {String} alias the alias that you want to retrieve.
+         * @return {*}
+         */
+        get: function (alias) {
+            return this.registered[alias];
+        },
+
+        /**
+         * @private
+         */
+        _otherwise: '',
+        /**
+         * @desc Set the otherwise or read from it.
+         * This is the default url that it will load or go to if there is not one.
+         * @memberof MultiRoute#
+         * @param {String=} path the path which can be a group path, or full path of aliases to go to
+         * when a current path does not match in the url.
+         * @return {String} the otherwise path.
+         */
+        otherwise: function (path) {
+            if(path !== undefined) {
+                this._otherwise = path;
+            }
+            return this._otherwise;
+        },
+
+        /**
+         * @desc Add a function to filter before a path is executed to allow or deny the app to go to that
+         * path. The method needs to return the path that it should go to.
+         * @memberof MultiRoute#
+         * @param {Function} pathFilter the path that it will literally match except for params.
+         */
+        addPathFilter: function(pathFilter) {
+            this.filters.addPathFilter(pathFilter);
+        },
+
+        /**
+         * @desc adds a path filter that will only be executed once.
+         * @memberof MultiRoute#
+         * @param {Function} pathFilter
+         */
+        addTemporaryPathFilter: function(pathFilter) {
+            this.filters.addTemporaryPathFilter(pathFilter);
+        },
+
+        /**
+         * @desc remove a path filter.
+         * @memberof MultiRoute#
+         * @param {Function} pathFilter
+         */
+        removePathFilter: function(pathFilter) {
+            this.filters.removePathFilter(pathFilter);
+        },
+
+        /**
+         * @desc Add a filter function to filter out any unwanted characters from the url.
+         * @memberof MultiRoute#
+         * @param {Function} pathFilter
+         */
+        addSecurityFilter: function(pathFilter) {
+            this.filters.addSecurityFilter(pathFilter);
+        },
+
+        /**
+         * @desc Get the current ungrouped path.
+         * @memberof MultiRoute#
+         * @return {String} return the current path ungrouped.
+         */
+        getFullPath: function () {
+            var item = this.getQueueItem();
+            if(item) {
+                return item.path;
+            }
+            return ''; // no path set yet.
+        },
+
+        /**
+         * @desc Get the current path from history as a group path.
+         * @memberof MultiRoute#
+         * @return {String} return the current path as grouped if the grouping exists.
+         */
+        getPath: function() {
+            var path = this.getFullPath();
+            return this.parser.pathToGroupPath(path, this.groups);
+        },
+
+        /**
+         * @desc Get the params of the current path.
+         * @memberof MultiRoute#
+         * @return {null|Object}
+         */
+        getPathUrlParams: function() {
+            return angular.copy(this.queue.getActiveItem().urlParams);
+        },
+
+        /**
+         * @desc Get the current path with urlParams as a single string.
+         * @memberof MultiRoute#
+         * @return {String}
+         */
+        getPathWithParams: function() {
+            return this.parser.pathToGroupPath(this.queue.getActiveItem().pathWithUrlParams, this.groups);
+        },
+
+        /**
+         * @desc Get a set of parameters back in history.
+         * @memberof MultiRoute#
+         * @param {Number} delta
+         * @return {null|Object}
+         */
+        getHistoryByDelta: function(delta) {
+            return this.history.getHistoryByDelta(delta);
+        },
+
+        /**
+         * @desc add a path to the history that will be excluded from tracking.
+         * This is handy for places like a calendar that you want to have then navigate to to pick
+         * a date, but when you don't want them to go to if they hit the back button in the app.
+         * This does not exclude if they use the back button in the address bar.
+         * @memberof MultiRoute#
+         * @param {String} path a path to match against to keep it from beind added to the history.
+         */
+        addHistoryExclusion: function(path) {
+            this.history.addExclusion(this.parser.ungroupPath(path, this.groups));
+        },
+
+        /**
+         * @desc get the delta of how far back a path was used in history.
+         * @memberof MultiRoute#
+         * @param {String} path
+         * @return {*}
+         */
+        howFarBackIsStringInHistory: function(path) {
+            return this.history.howFarBackIsStringInHistory(path);
+        },
+
+        /**
+         * @desc Parse the path into routes.
+         * @memberof MultiRoute#
+         * @param {String} path
+         * @private
+         */
+        _parse: function (path) {
+            path = this.parser.ungroupPath(path, this.groups);
+            this.routes = null;
+            this.routes = this.parser.parse(path, this.routes, this.patterns, this.registered, this.groups);
+        },
+
+        /**
+         * @desc Turn the path into a multiPath if it is a group.
+         * @memberof MultiRoute#
+         * @param {String} path
+         * @return {*}
+         */
+        groupPathToAliasPath: function(path) {
+            var groupHash = this.stripSlashFromGroupPath(path, this.groups);
+            if(groupHash) {
+                path = this.groups[groupHash];
+            }
+            return path;
+        },
+
+        /**
+         * @desc Set part of the path in a multiPath.
+         * @memberof MultiRoute#
+         * @param {String} pathPart
+         * @param {Number} index
+         * @param {Object=} urlParams
+         * @param {Object=} params
+         */
+        setPathAt: function(pathPart, index, urlParams, params) {
+            if(index !== undefined && index !== null) {
+                var path = this.groupPathToAliasPath(this.getQuery());
+                path = this.parser.replacePartInPath(path, index, pathPart);
+                this.setPath(path, urlParams, params);
+            } else {
+                throw new Error('['+this._name+'] invalid index for setPathAt');
+            }
+        },
+
+        /**
+         * @desc Pass the groupPath or multiPath and it will be put into the queue to be processed when
+         * the previous path has completed it's cycle.
+         * @memberof MultiRoute#
+         * @param {String} path
+         * @param {Object=} urlParams
+         * @param {Object=} params
+         * @return {*}
+         */
+        setPath: function (path, urlParams, params) {// expects the whole path
+            var groupPath;
+            if(!path) {
+                path = this.otherwise();
+                params = null; // otherwise can not have params. It is the default view.
+            }
+            log('setPath', path, urlParams, params);
+            groupPath = this.parser.pathToGroupPath(path, this.groups);
+            path = this.filters.processSecurityFilters(groupPath);
+            path = this.filters.processPathFilters(path);
+            // we are going to add the path to the QueueManager to handle when it gets executed.
+            this.queue.addPath(this.parser.ungroupPath(path, this.groups), urlParams, params);
+            return this;
+        },
+
+        /**
+         * @desc Get the current active queueItem.
+         * @memberof MultiRoute#
+         * @return {*}
+         */
+        getQueueItem: function() {
+            return this.queue.getActiveItem();
+        },
+
+        /**
+         * @desc This is called from the queue when it is ready to accept the next path.
+         * @memberof MultiRoute#
+         * @param {ui.multiRoute.MultiRouteQueueItem} queueItem
+         * @param {ui.multiRoute.MultiRouteQueueItem} prevQueueItem
+         * @private
+         */
+        _processPath: function(queueItem, prevQueueItem) {
+            var path = queueItem.path,
+                urlParams = queueItem.urlParams,
+                params = queueItem.params,
+                prevPath,
+                nextPath;
+            var groupHash = this.parser.stripSlashFromGroupPath(path, this.groups);
+            if(groupHash) {
+                path = groupHash;
+            }
+            this.$rootScope.$broadcast(ui.multiRoute.events.BEFORE_CHANGE, this.$location.path(), path);
+            this._parse(path);// parse creates the routes.
+            if (!this.routes.length && this._otherwise) {
+                warn(path, "was not found. redirecting to otherwise.");
+                // there is either no url, or a url that doesn't match an alias. Send them to otherwise.
+                this._parse(this._otherwise);
+                path = this._otherwise;
+                urlParams = undefined;
+                params = undefined;
+                this.queue.forceReplaceActiveItem(this.parser.ungroupPath(path, this.groups), urlParams, params);
+            }
+            prevPath = this.parser.pathToGroupPath(prevQueueItem && prevQueueItem.pathWithUrlParams, this.groups);
+            nextPath = this.parser.pathToGroupPath(queueItem.pathWithUrlParams, this.groups);
+            this.$rootScope.$broadcast('$routeChangeStart', prevPath, nextPath);
+            this._applyPath(path, urlParams, params, queueItem.indexDelta);
+        },
+
+        /**
+         * @desc update hash to reflect from query string.
+         * @memberof MultiRoute#
+         * @param {number, undefined} indexDelta
+         */
+        go: function (indexDelta) {
+            // if they are not going forward or back. There is no point. so ignore it.
+            if(indexDelta !== 0) {
+                this.queue.addHistoryPath(indexDelta);
+            }
+        },
+
+        /**
+         * @desc Extract params from the url to be used as the params object added to a path.
+         * @memberof MultiRoute#
+         * @param {String} url
+         * @return {*}
+         */
+        getParamsFromUrl: function(url) {
+            if (url.indexOf('?') !== -1) {
+                var paramsStr = url.split('?').pop();
+                return ui.query.QueryUtil.parse(paramsStr);
+            }
+            return null;
+        },
+
+        /**
+         * When the route is changed by the url instead of using set. This will check to make sure
+         * that it wasn't once of the routes that had changed it and if not then it will set that
+         * as the path.
+         * @private
+         */
+        _onRouteChange: function () {
+            // if this is fired while the status is not READY. then it is the multiRoute that has caused it.
+            // so just ignore it unless we are in a ready state.
+            if(this.queue.getStatus() === ui.multiRoute.routeStatus.READY) {
+                var hash = this.$location.path();
+                var urlParams = this.getParamsFromUrl(this.$location.url());
+                this.setPath(hash, urlParams);
+            }
+        },
+
+        /**
+         * Sets the initial listeners and vars.
+         * @private
+         */
+        setup: function () {
+            this.dirty = true;
+            var self = this;
+            if (!this.initialized) {
+                this.initialized = true;// make sure the listener is only set once.
+                this.$rootScope.$on('$locationChangeSuccess', function() {
+                    if(self.startOnOtherwise) {
+                        self.setPath(self.otherwise());
+                        self.startOnOtherwise = false;
+                    } else {
+                        self._onRouteChange();
+                    }
+                });
+            }
+        },
+
+        /**
+         * The path is ready for it's final stages of integration.
+         * @param path
+         * @param urlParams
+         * @param params
+         * @param indexDelta
+         * @private
+         */
+        _applyPath: function(path, urlParams, params, indexDelta) {
+            path = this.filters.processSecurityFilters(path);
+            var self = this;
+            if(this.synchronous) {
+                this._applyPathWait(path, urlParams, params, indexDelta);
+            } else {
+                // allow thread to clear before processing new path. This makes it work in IE and Android.
+                this._applyPathWaitIntv = setTimeout(function() {
+                    clearTimeout(self._applyPathWaitIntv);
+                    self._applyPathWait(path, urlParams, params, indexDelta);
+                }, 1);
+            }
+        },
+
+        /**
+         * Change the url in the browser and fire the events for the MultiRouteView.
+         * There is no going back now, so set the history as well.
+         * @param path
+         * @param urlParams
+         * @param params
+         * @param indexDelta
+         * @private
+         */
+        _applyPathWait: function(path, urlParams, params, indexDelta) {
+            var groupPath = this.parser.pathToGroupPath(path, this.groups);
+            this.history.addToHistory(path, urlParams, params, indexDelta);
+            this.$location.path(groupPath);//this.history._mergePathWithUrlParams(groupPath, urlParams));
+            this.$location.search(urlParams || '');
+            this.$rootScope.$broadcast(ui.multiRoute.events.CHANGE);
+        },
+
+        /**
+         * @desc Checks to see if in the routes object the current alias exists.
+         * @memberof MultiRoute#
+         * @param alias
+         * @return {Boolean}
+         */
+        hasAlias: function(alias) {
+            var i, ilen;
+            for (i = 0, ilen = this.routes.length; i &lt; ilen; i+=1) {
+                var r = this.routes[i];
+                var j;
+                for(j in r) {
+                    if(r.hasOwnProperty(j)) {
+                        if(r[j] && r[j].alias === alias) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        },
+
+        /**
+         * @desc Build a multiPath out of routes and groups.
+         * @memberof MultiRoute#
+         * @return {String}
+         */
+        getQuery: function() {
+            return this.parser.getQuery(this.routes, this.groups);
+        },
+
+        /********************************************************
+         * Error Handling
+         ********************************************************/
+
+        /**
+         * @param {String} name
+         * @private
+         */
+        _validateNameDoesNotAlreadyExist: function(name) {
+            this._validateAliasDoesNotAlreadyExist(name);
+            this._validateGroupDoesNotAlreadyExist(name);
+        },
+
+        /**
+         * @param {String} name
+         * @private
+         */
+        _validateAliasDoesNotAlreadyExist: function(name) {
+            if(this.registered[name]) {
+                throw new Error('[' + this._name + '] Cannot register group name, alias already registered with value of "' + name + '".');
+            }
+        },
+
+        /**
+         * @param {String} name
+         * @private
+         */
+        _validateGroupDoesNotAlreadyExist: function(name) {
+            if(this.group[name]) {
+                throw new Error('[' + this._name + '] Cannot register alias, group name already registered with value of "' + name + '".');
+            }
+        },
+
+        /**
+         * @param {String} path
+         * @private
+         */
+        _validateGroupPatternDoesNotAlreadyExist: function(path) {
+            var groupPath = this.parser.pathToGroupPath(path, this.groups);
+            if(groupPath !== path) {
+                throw new Error('[' + this._name + '] that pattern is already used in group "' + groupPath + '".');
+            }
+        }
+    };
+
+    /*************************************************************************************************
+     * Handle the filtering for multiRoute.
+     * Both path filtering so the paths can be filtered for where the user has access to
+     * as well as filtering out characters for security.
+     * @type {ui.multiRoute.MultiRouteFilters}
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteFilters = function MultiRouteFilters() { this.init(); return this; };
+    ui.multiRoute.MultiRouteFilters.prototype = {
+
+        /**
+         * List of filters that can be used to filter the hash before it is parsed by multiRoute
+         * @private
+         */
+        _pathFilters: null,
+        /**
+         * @private
+         */
+        _securityFilters: null,
+
+        /**
+         * @this {ui.multiRoute.MultiRouteFilters}
+         */
+        init: function() {
+            this._pathFilters = [];
+            this._securityFilters = [];
+        },
+
+        /**
+         * Add a function to filter the path.
+         * filter function is expected to return the path that they want to go to.
+         * @param {Function} fn
+         */
+        addSecurityFilter: function(fn) {
+            this._securityFilters.push({filter:fn, executed:0, limit:0});
+        },
+
+        /**
+         * Add a hash filter.
+         * @param {Function} fn
+         */
+        addPathFilter: function(fn) {
+            this._pathFilters.push({filter:fn, executed:0, limit:0});
+        },
+
+        /**
+         * Add a path filter that only executes once.
+         * @param fn
+         */
+        addTemporaryPathFilter: function(fn) {
+            this._pathFilters.push({filter:fn, executed:0, limit:1});
+        },
+
+        /**
+         * Remove a path filter.
+         * @param fn
+         */
+        removePathFilter: function(fn) {
+            var i,
+                iLen = this._pathFilters.length;
+            for(i = 0; i &lt; iLen; i += 1) {
+                if(this._pathFilters[i].filter === fn) {
+                    this._pathFilters.splice(i, 1);
+                    i -= 1;
+                    iLen -= 1;
+                }
+            }
+        },
+
+        /**
+         * @param {string} hash
+         * @return {string}
+         */
+        processPathFilters: function(hash) {
+            return this._processFilters(this._pathFilters, hash);
+        },
+
+        /**
+         * @param path
+         * @return {*}
+         */
+        processSecurityFilters: function(path) {
+            return this._processFilters(this._securityFilters, path);
+        },
+
+        _processFilters: function(list, str) {
+            var i, ilen = list.length, filterItem;
+            for(i = 0; i &lt; ilen; i+=1) {
+                filterItem = list[i];
+                str = filterItem.filter(str);
+                filterItem.executed += 1;
+                if(filterItem.executed === filterItem.limit) {
+                    this.removePathFilter(filterItem.filter);
+                }
+            }
+            return str;
+        }
+    };
+
+    /*************************************************************************************************
+     * Manage history for the MultiRoute.
+     * It will allow a path and params to be added to the history.
+     * It will then keep the same items in reference so that if we return
+     * to that path in history the same parameters that were passed before can be
+     * passed again.
+     * @type {ui.multiRoute.MultiRouteHistory}
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteHistory = function MultiRouteHistory() { this.init(); return this; };
+    ui.multiRoute.MultiRouteHistory.prototype = {
+        _name: 'MultiRouteHistory',
+        historyIndex: -1,
+        history: null,
+        historyExclusions: null,
+
+        /**
+         * @this {ui.multiRoute.MultiRouteHistory}
+         */
+        init: function() {
+            this.history = [];
+            this.historyExclusions = {};
+            this.historyIndex = -1;
+        },
+
+        /**
+         * Get the current history item at the current index.
+         * @return {*}
+         */
+        getLastPath: function () {
+            if(this.history.length>0) {
+                return this.getHistoryAt(this.history.length - 1);
+            }
+            return "";
+        },
+
+        /**
+         * Change the index by delta.
+         * @param indexDelta
+         */
+        go: function(indexDelta) {
+            if(isNaN(indexDelta)) {
+                throw new Error("["+this._name+"].go(indexDelta) indexDelta must be a number.");
+            }
+            this.historyIndex += indexDelta;
+        },
+
+        /**
+         * Get a history item by a delta index.
+         * @param {Number} indexDelta
+         * @param {String} currentPath
+         * @return {*}
+         */
+        getHistoryByDelta: function(indexDelta, currentPath) {
+            var index = this.historyIndex + indexDelta;
+            // we need to see if the current path is excluded. If it is, we add one to the delta.
+            if(this.hasExclusion(currentPath)) {
+                index += 1;
+            }
+            return this.history[index];
+        },
+
+        /**
+         * Return the history item at that absolute index.
+         * @param index
+         * @return {*}
+         */
+        getHistoryAt: function(index) {
+            return this.history[index];
+        },
+
+        /**
+         * Get the deltaIndex of a path in history.
+         * @param str
+         * @return {*}
+         */
+        howFarBackIsStringInHistory: function(str) {
+            var index = this.getIndexOfLastOccurrenceInHistory(str);
+            return this.history.length - index;
+        },
+
+        /**
+         * get the absolute index of the last usage of that path in history.
+         * @param str
+         * @return {*}
+         */
+        getIndexOfLastOccurrenceInHistory: function(str) {
+            var i;
+            for(i = this.history.length-1; i >= 0; i-=1) {
+                if(this.history[i].path === str) {
+                    return i;
+                }
+            }
+            return -1;
+        },
+
+        /**
+         * Add a exclusion path that will prevent the same path from being able to be added
+         * to the history.
+         * @this {ui.multiRoute.MultiRouteHistory}
+         * @param path {String}
+         */
+        addExclusion: function(path) {
+            this.historyExclusions[path] = true;
+        },
+
+        /**
+         * Check to see if the path is excluded.
+         * @param path {String}
+         * @return {Boolean}
+         */
+        hasExclusion: function(path) {
+            return this.historyExclusions[path] !== undefined;
+        },
+
+        /**
+         * Add a path and params to history. Specify the indexDelta of where to add it.
+         * @param path {String}
+         * @param urlParams {Object=}
+         * @param params {Object=}
+         * @param indexDelta {Number=}
+         */
+        addToHistory: function(path, urlParams, params, indexDelta) {
+            if(!this.hasExclusion(path)) {
+                this.go(indexDelta);
+                var pathWithUrlParams = this.mergePathWithUrlParams(path, urlParams);
+                if(indexDelta > 0 && this._sameAsLastPath(pathWithUrlParams) && this.historyIndex > 0) {
+                    this.go(-1);
+                } else if(indexDelta &lt; 0 && this._sameAsNextPath(pathWithUrlParams) && this.historyIndex > 0) {
+                    this.historyIndex += 1;
+                }
+                if(this.historyIndex &lt; 0) {
+                    this.historyIndex = 0;
+                }
+                if(indexDelta > 0) {
+                    this.clearForwardHistoryIfNotMatchingPath(pathWithUrlParams);
+                }
+                this.history[this.historyIndex] = {path:path, urlParams:urlParams, params:params, pathWithUrlParams:pathWithUrlParams};
+            } else {
+                log("\t", path, "EXCLUDED from history");
+            }
+        },
+
+        /**
+         * Combine the path with url params and return as a string.
+         * @param path {String}
+         * @param urlParams {Object=}
+         * @return {String}
+         */
+        mergePathWithUrlParams: function(path, urlParams) {
+            return path + (urlParams ? '?' + ui.query.QueryUtil.objectToQuery(urlParams) : '');
+        },
+
+        /**
+         * When you move back in history the history doesn't change.
+         * If you then move forward in history the history doesn't change.
+         * If you move back in history and then go to a url that isn't the next in the forward history
+         * then this needs to get rid of the forward history starting from where you are at.
+         * @param pathWithUrlParams {String}
+         */
+        clearForwardHistoryIfNotMatchingPath: function(pathWithUrlParams) {
+            if(this.history.hasOwnProperty(this.historyIndex) && this.history[this.historyIndex].pathWithUrlParams !== pathWithUrlParams) {
+                this.history.splice(this.historyIndex, this.history.length - this.historyIndex);
+            }
+        },
+
+        /**
+         * Check the next path and if it is the same
+         * @param pathWithUrlParams
+         * @return {Boolean}
+         * @private
+         */
+        _sameAsNextPath: function(pathWithUrlParams) {
+            var nextValue = this.history[this.historyIndex+1];
+            return nextValue && nextValue.pathWithUrlParams === pathWithUrlParams;
+        },
+
+        /**
+         * Compare to previous path to see if it is the same. We don't want to track history
+         * if they keep hitting the same page.
+         * @param pathWithUrlParams
+         * @return {Boolean}
+         * @private
+         */
+        _sameAsLastPath: function(pathWithUrlParams) {
+            var previousValue = this.history[this.historyIndex-1];
+            return previousValue && previousValue.pathWithUrlParams === pathWithUrlParams; // it is the same as the last path.
+        }
+    };
+
+    /*************************************************************************************************
+     * Route parsing and gouping of routes.
+     * @type {ui.multiRoute.MultiRouteParser}
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteParser = function MultiRouteParser() { this.init(); return this; };
+    ui.multiRoute.MultiRouteParser.prototype = {
+        /**
+         * @type {String}
+         */
+        _name: 'MultiRouteParser',
+        /**
+         * @type {String}
+         */
+        sep: ui.multiRoute.config.SEPARATOR,
+
+        init: function() {},
+
+        /**
+         * Break apart a groupPath into a multiPath
+         * @param path {String}
+         * @param groups {Object}
+         * @return {*}
+         */
+        ungroupPath: function(path, groups) {
+            var groupHash = this.stripSlashFromGroupPath(path, groups);
+            if (groupHash) {
+                path = groups[groupHash];
+            }
+            return path;
+        },
+
+        /**
+         * Take a path and convert it into as many routes as are needed for the
+         * multiViews.
+         * @param path {String}
+         * @param routes {Object}
+         * @param patterns {Array}
+         * @param registered {Object}
+         * @param groups {Object}
+         * @return {*}
+         */
+        parse: function(path, routes, patterns, registered, groups) {
+            if (path === this.getQuery(routes, groups)) {
+                return routes;
+            }
+
+            path = this.ungroupPath(path, groups);
+            // define vars after return, because they are not needed if it returns.
+            var paths = path && path.length ? path.split(this.sep) : '';
+            return this.parseRoutes(paths, patterns, registered);
+        },
+
+        /**
+         * Parse the paths into routes.
+         * @param paths {Array}
+         * @param patterns {Array}
+         * @param registered {Object}
+         * @return {Array}
+         */
+        parseRoutes: function(paths, patterns, registered) {
+            var i, iLen, used = {}, routes = [];
+            for (i = 0, iLen = paths.length; i &lt; iLen; i += 1) {
+                var route = this.parseRoute(paths[i], used, patterns, registered);
+                if (route) {
+                    routes.push(route);
+                }
+            }
+            return routes;
+        },
+
+        /**
+         * Parse the path into a route.
+         * @param str {String}
+         * @param used {Object}
+         * @param patterns {Array}
+         * @param registered {Object}
+         * @return {*}
+         */
+        parseRoute:function (str, used, patterns, registered) {
+            // now we need to loop the patterns and find any that match.
+            var j,
+                jlen,
+                pattern,
+                result;
+            if (!patterns.length) {
+                logError("no $multiRoute.when statements are provided");
+            }
+            str = this.checkAndAddLeadingSlash(str);
+            for (j = 0, jlen = patterns.length; j &lt; jlen; j += 1) {
+                pattern = patterns[j];
+                result = this._parsePattern(str, pattern, used, registered);
+                if(result) {
+                    return result;
+                }
+            }
+            return null;
+        },
+
+        /**
+         * @private
+         */
+        _parserPattern: /:[a-zA-Z0-9\-]+/gi,
+        /**
+         * @param pattern {Array}
+         * @param used {Object}
+         * @return {Array}
+         * @private
+         */
+        _buildRemainingParams: function(pattern, used) {
+            var patternParams = pattern.match(this._parserPattern),
+                remainingParams = [];
+            while (patternParams.length) {
+                var param = patternParams.shift();
+                param = param.substr(1, param.length);// drop the colon.
+                if (param && !used[param]) {
+                    remainingParams.push(param);
+                }
+            }
+            return remainingParams;
+        },
+
+        /**
+         * @param pattern
+         * @return {RegExp}
+         * @private
+         */
+        _patternToRegEx: function(pattern) {
+            var ptrn = pattern.replace(/\\\\/, '\\');
+            ptrn = '^' + ptrn.replace(this._parserPattern, '[a-zA-Z0-9\\-]+') + '$';
+            return new RegExp(ptrn);
+        },
+
+        /**
+         * @param str
+         * @param pattern
+         * @param used
+         * @param registered
+         * @return {*}
+         * @private
+         */
+        _parsePattern: function(str, pattern, used, registered) {
+            var remainingParams = this._buildRemainingParams(pattern, used),
+                reg,
+                result;
+            if (remainingParams.length) { //!used || !used.hasOwnProperty(pattern)) {
+                reg = this._patternToRegEx(pattern);
+                if (str.match(reg)) {
+                    this._populateUsed(remainingParams, used);
+                    // now that the pattern has matched. We need to populate the object of values for the views.
+                    result = this._patternPartsToRoute(str, pattern.match(this._parserPattern), str.split('/'), registered);
+                }
+            }
+            return result;
+        },
+
+        /**
+         * @param remainingParams
+         * @param used
+         * @private
+         */
+        _populateUsed: function(remainingParams, used) {
+            while (remainingParams.length) {
+                used[remainingParams.shift()] = true;
+            }
+        },
+
+        /**
+         * @param str
+         * @param props
+         * @param parts
+         * @param registered
+         * @return {*}
+         * @private
+         */
+        _patternPartsToRoute: function(str, props, parts, registered) {
+            var result = {args:[]},
+                endOfPathAlias = parts[parts.length-1],
+                k,
+                kLen,
+                p,
+                route;
+            parts.shift();// first one is just the first slash match.
+            for (k = 0, kLen = props.length; k &lt; kLen; k += 1) {
+                if (!result._order) {
+                    result._order = [];
+                }
+                p = props[k].split(':').join('');
+                result._order.push(p);
+                route = registered.hasOwnProperty(parts[k]) ? registered[parts[k]] : null;
+                if(route) {
+                    route.path = str;
+                    route.endOfPath = route.alias === endOfPathAlias;
+                    result[p] = route;
+                } else {
+                    // the aliases on the url are not registered. we cannot return a valid route.
+                    return null;
+                }
+            }
+            while (parts.length > k) {
+                result.args.push(parts[k]);
+                parts.shift();
+            }
+            return result;
+        },
+
+        /**
+         * get targets into a query string.
+         * @param routes
+         * @param groups
+         * @return {*}
+         */
+        getQuery: function (routes, groups) {
+            var str = '',
+                result = [],
+                i,
+                iLen;
+            if(!routes || !groups) {
+                return '';
+            }
+            for (i = 0, iLen = routes.length; i &lt; iLen; i+=1) {
+                var route = routes[i];
+                if (typeof route === "string") {
+                    result.push(route);
+                } else if (route._order) {
+                    str = '';
+                    var j, jLen;
+                    for (j = 0, jLen = route._order.length; j &lt; jLen; j+=1) {
+                        var prop = route._order[j];
+                        str += '/' + (typeof route[prop] === 'string' ? route[prop] : route[prop].alias);
+                    }
+                    if(route.args && route.args.length) {
+                        str += '/'+route.args.join('/');
+                    }
+                    result.push(str);
+                }
+            }
+            str = result.join(this.sep);
+            return this.pathToGroupPath(str, groups);
+        },
+
+        /**
+         * get the group alias for a path if one exists and return it.
+         * otherwise we just keep the multiPath.
+         * @param str
+         * @param groups
+         * @return {*}
+         */
+        pathToGroupPath: function(str, groups) {
+            var i,
+                parts = str && str.split('?'),
+                path,
+                paramStr;
+            if(parts) {
+                path = parts.shift();
+                paramStr = parts.shift();
+            } else {
+                path = str;
+            }
+            for(i in groups) {
+                if(groups.hasOwnProperty(i)) {
+                    if(groups[i] === path) {
+                        path = '/'+i;
+                        break;
+                    }
+                }
+            }
+            return path ?  path + (paramStr ? '?' + paramStr : '') : null;
+        },
+
+        /**
+         * We match groups without the slash. So clean it up and try to find if the group exists.
+         * @param hash
+         * @param groups
+         * @return {*}
+         */
+        stripSlashFromGroupPath: function(hash, groups) {
+            if(hash.charAt(0) === '/' && groups.hasOwnProperty(hash.substr(1, hash.length))) {
+                hash = hash.substr(1, hash.length);
+            }
+            if(groups.hasOwnProperty(hash)) {
+                return hash;
+            }
+            return null;
+        },
+
+        /**
+         * add the slash back because it is needed in paths.
+         * @param str
+         * @return {*}
+         */
+        checkAndAddLeadingSlash: function(str) {
+            if(str.charAt(0) !== '/') {
+                str = '/'+str;
+            }
+            return str;
+        },
+
+        /**
+         * Replace a part of a path with a new path.
+         * @param path
+         * @param index
+         * @param part
+         * @return {String}
+         */
+        replacePartInPath: function(path, index, part) {
+            var parts = path.split(this.sep);
+            parts[index] = part;
+            return parts.join(this.sep);
+        }
+    };
+
+    /*************************************************************************************************
+     * The queue items that are handled by the MultiRouteQueue manager to maintain state of paths until
+     * they are executed.
+     * @type {ui.multiRoute.MultiRouteQueueItem}
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteQueueItem = function MultiRouteQueueItem(path, urlParams, params, indexDelta, onStatus) {
+        this.init.apply(this, arguments);
+        return this;
+    };
+    ui.multiRoute.MultiRouteQueueItem.prototype = {
+        _name: 'MultiRouteQueueItem',
+        _status: null,
+        parts: null,
+        indexDelta: 0,
+        callbacks: null,
+        onStatus: null,
+        init: function(path, urlParams, params, indexDelta, onStatus) {
+            this.reset(path, urlParams, params, indexDelta, onStatus);
+        },
+
+        /**
+         * Set or reset the data for this queueItem.
+         * @param path
+         * @param urlParams
+         * @param params
+         * @param indexDelta
+         * @param onStatus
+         */
+        reset: function(path, urlParams, params, indexDelta, onStatus) {
+            this._status = ui.multiRoute.routeStatus.WAITING;
+            this.path = path;
+            this.urlParams = urlParams;
+            this.params = params;
+            this.indexDelta = indexDelta;
+            this.parts = this.splitParts(path);
+            this.callbacks = this.callbacks || {};
+            this.onStatus = onStatus;
+            this.urlParamsStr = ui.query.QueryUtil.objectToQuery(urlParams);
+            this.pathWithUrlParams = path + (urlParams ? '?' + this.urlParamsStr : '');
+        },
+
+        getStatus: function() { return this._status; },
+
+        _updateStatus: function(partStatus) {
+            var prev = this._status;
+            partStatus = this.calculatePartsStatus(partStatus);
+            if(this._status !== partStatus) {
+                this._status = partStatus;
+                if(!this.onStatus(this)) {
+                    this._status = prev;
+                }
+            }
+        },
+
+        splitParts: function(path) {
+            var partsArray = path.split(ui.multiRoute.config.SEPARATOR),
+                parts = {};
+            while(partsArray.length) {
+                parts[partsArray.shift()] = ui.multiRoute.routeStatus.WAITING;
+            }
+            return parts;
+        },
+
+        setPartialPathStatus: function(routePart, status) {
+            if(typeof routePart !== "object") {
+                throw new Error("Route part must be a multiRoute route.");
+            }
+            log("\t", routePart.alias, this.path, routeStatusLabel[status]);
+            if(routePart.endOfPath && this.parts[routePart.path]) {
+                this.parts[routePart.path] = status;
+                this._updateStatus(status);
+            }
+        },
+
+        calculatePartsStatus: function(targetStatus) {
+            var i;
+            for(i in this.parts) {
+                if(this.parts.hasOwnProperty(i) && this.parts[i] &lt; targetStatus) {
+                    return this.parts[i];
+                }
+            }
+            return targetStatus;
+        },
+
+        addCallback: function (type, callback) {
+            if(type >= ui.multiRoute.routeStatus.WAITING && type &lt;= ui.multiRoute.routeStatus.READY) {
+                this.callbacks[type] = this.callbacks[type] || [];
+                this.callbacks[type].push(callback);
+            } else {
+                throw new Error('[' + this._name + '] type of "' + type + '" is not a valid callback type.');
+            }
+        },
+
+        transferCallbacks: function(queueItem) {
+            var i;
+            for(i in queueItem.callbacks) {
+                if(queueItem.callbacks.hasOwnProperty(i)) {
+                    this.callbacks[i] = queueItem.callbacks[i];
+                }
+            }
+        }
+    };
+
+    /*************************************************************************************************
+     * Maintain the state of paths until they are executed.
+     * maintain the active path.
+     * control history access to paths when navigating back in history.
+     * @type {ui.multiRoute.MultiRouteQueue}
+     * @param {ui.multiRoute.MultiRouteHistory} history
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteQueue = function MultiRouteQueue(history) { this.init.apply(this, arguments); return this; };
+    ui.multiRoute.MultiRouteQueue.prototype = {
+        _name: 'MultiRouteQueue',
+        _pendingPaths: null,
+        _pathCache: null,
+
+        _activeItem: null,
+        onNext: null,
+
+        /**
+         * queue has a dependency on history because history cannot be calculated until the time to execute that
+         * path because otherwise the history has not yet been generated.
+         * @type {ui.multiRoute.MultiRouteHistory}
+         */
+        history: null,
+        onItemStatusBind: null,
+
+        /**
+         * @param {ui.multiRoute.MultiRouteHistory} history
+         */
+        init: function(history) {
+            this.onItemStatusBind = this._onItemStatus.bind(this);
+            this.history = history;
+            this._pendingPaths = [];
+            this._pathCache = {};
+        },
+
+        /**
+         * The status of the current item.
+         * @return {*}
+         */
+        getStatus: function() {
+            return this._activeItem ? this._activeItem.getStatus() : ui.multiRoute.routeStatus.READY;
+        },
+
+        length: function() {
+            return this._pendingPaths.length;
+        },
+
+        /**
+         * Get the current item.
+         * @return {*}
+         */
+        getActiveItem: function() {
+            return this._activeItem; // it is always the first one because other items are waiting.
+        },
+
+        /**
+         * Add a path for the queue to manage.
+         * When items are added to the queue they are only an object of what is passed.
+         * they are not converted to a queueItem until they are activated.
+         *
+         * This is because history items can only be calculated when their turn is active.
+         * @param path
+         * @param urlParams
+         * @param params
+         */
+        addPath: function(path, urlParams, params) {
+            if(!this._activeItem || this.history.mergePathWithUrlParams(path, urlParams) !== this.history.mergePathWithUrlParams(this._activeItem.path, this._activeItem.urlParams)) {
+                this._pendingPaths.push({path: path, urlParams: urlParams, params: params, indexDelta: 0});
+                this._processNextPath();
+            }
+        },
+
+        /**
+         * Allow the current active item to be switched.
+         * This is handy to use when a url is determined to be invalid once the item is active.
+         * @param path
+         * @param urlParams
+         * @param params
+         */
+        forceReplaceActiveItem: function(path, urlParams, params) {
+            this._activeItem.reset(path, urlParams, params, 0, this._activeItem.onStatus);
+        },
+
+        /**
+         * Add a history item. Only difference is that this has an indexDelta where the others
+         * do not which will be needed to determine how it is constructed as a queueItem.
+         * @param indexDelta
+         */
+        addHistoryPath: function(indexDelta) {
+            this._pendingPaths.push({path: null, urlParams: null, params: null, indexDelta: indexDelta});
+            this._processNextPath();
+        },
+
+        /**
+         * Process the next set of parameters into the active item if the active item
+         * is in ready status.
+         * @private
+         */
+        _processNextPath: function() {
+            // if there are no paths then we do nothing. We are waiting for a path change.
+            if(this._pendingPaths.length) {
+                if(!this._activeItem || (this._activeItem.getStatus() === ui.multiRoute.routeStatus.READY)) {
+                    this._startNextItem();
+                }
+            }
+        },
+
+        /**
+         * Create the queueItem based on the data stored in the pendingPaths.
+         * @return {*}
+         * @private
+         */
+        _createQueueItem: function() {
+            var item = this._pendingPaths.shift(),
+                queueItem,
+                historyItem,
+                indexDelta;
+            if(item.indexDelta === 0) {
+                queueItem = new ui.multiRoute.MultiRouteQueueItem(item.path, item.urlParams, item.params, 1, this.onItemStatusBind);
+            } else {// it can only be a history item. so we need to copy properties.
+                log('Navigating to history item', item.indexDelta);
+                indexDelta = item.indexDelta;
+                historyItem = this.history.getHistoryByDelta(indexDelta, this._activeItem.path);
+                if(historyItem) {
+                    queueItem = new ui.multiRoute.MultiRouteQueueItem(historyItem.path, historyItem.urlParams, historyItem.params, indexDelta, this.onItemStatusBind);
+                } else {
+                    queueItem = this._activeItem;
+                }
+            }
+            this._pathCache[queueItem.path] = queueItem;
+            return queueItem;
+        },
+
+        /**
+         * remove the old active item and set the new one.
+         * @private
+         */
+        _startNextItem: function() {
+            var previous = this._activeItem;
+            this._removeItem(this._activeItem);
+            this._activeItem = this._createQueueItem();
+            if(this.onNext) {
+                this.onNext(this._activeItem, previous);
+            }
+        },
+
+        /**
+         * Callback fired on the status change of the activeItem.
+         * Depending on the status we fire other callbacks and if ready
+         * process again.
+         * @param queueItem
+         * @return {*}
+         * @private
+         */
+        _onItemStatus: function(queueItem) {
+            var valid = this.isValidStatus(queueItem.getStatus());
+            if(valid) {
+                this._executeCallbacks(queueItem);
+            }
+            if(queueItem.getStatus() === ui.multiRoute.routeStatus.READY) {
+                this._processNextPath();
+            }
+            return valid;
+        },
+
+        /**
+         * Make sure that only valid status values are used or it is real hard to find out
+         * where it stopped.
+         * @param status
+         * @return {*|Boolean}
+         */
+        isValidStatus: function(status) {
+            return status && status &lt;= ui.multiRoute.routeStatus.READY;
+        },
+
+        /**
+         * Remove the item from the queue.
+         * @param queueItem
+         * @private
+         */
+        _removeItem: function(queueItem) {
+            if(queueItem) {
+                delete this._pathCache[queueItem.path];
+            }
+        },
+
+        /**
+         * Execute all callbacks that are listening on that item for it's current status.
+         * @param queueItem
+         * @private
+         */
+        _executeCallbacks: function(queueItem) {
+            var i,
+                status = queueItem.getStatus(),
+                list = queueItem.callbacks[status] || [],
+                iLen = list.length;
+            for(i = 0; i &lt; iLen; i += 1) {
+                list[i](status);
+            }
+        }
+    };
+
+    // private constants
+    var MULTIVIEW_NODE = 'ui-multiview';
+
+    /*************************************************************************************************
+     * A Singleton Utility.
+     * @type {ui.multiRoute.MultiViewUtil}
+     * @private
+     ************************************************************************************************/
+    function MultiViewUtil() { this.init(); return this; }
+    MultiViewUtil.prototype = {
+        commentTags: /&lt;\!\-\-[\w\W\d]*?\-\-\>/g,
+        controllerPattern: /ng\:controller\=\"([\w\W]*?)\"/i,
+        init: function() {},
+        /**
+         * convenience function for getting attributs of elements.
+         * @param node
+         */
+        getAttributes: function(node) {
+            var result = {}, i, len;
+            if (node.attributes) {
+                for (i = 0, len = node.attributes.length; i &lt; len; i+=1) {
+                    var attr = node.attributes[i];
+                    result[attr.nodeName] = attr.value;
+                }
+            }
+            return result;
+        },
+
+        /**
+         * use by multiView to get its hierarchy dependencies.
+         * @param element
+         */
+        getHierarchy: function(element) {
+            if(!element.parent().length) {
+                // the element has not been attached to the dom yet. So hierarchy cannot be determined.
+                return null;
+            }
+            var hierarchy = [];
+            var p = element.parent();
+            var dmv = 'data-'+MULTIVIEW_NODE;
+            var dt = 'data-target';
+            var t = 'target';
+            while (p.length) {
+                var attributes = this.getAttributes(p[0]);
+                if (p[0].nodeName.toLowerCase() === MULTIVIEW_NODE) {
+                    hierarchy.unshift(attributes.hasOwnProperty(t) ? attributes[t] : attributes[dt]);
+                } else if (attributes.hasOwnProperty(MULTIVIEW_NODE) || attributes.hasOwnProperty(dmv)) {
+                    hierarchy.unshift(attributes.hasOwnProperty(t) ? attributes[t] : attributes[dt]);
+                }
+                p = p.parent();
+            }
+            return hierarchy;
+        },
+
+        /**
+         * get data from registration to values.
+         * @param ctrlOrName
+         * @param templateUrl
+         */
+        getCtrlClass: function(ctrlOrName, templateUrl) {
+            var response = ldr.cache(templateUrl);
+            if(!response) {
+                response = '&lt;div>You loaded an empty html file. Please check the url and try again. You must have exactly one top level node in a partial.&lt;/div>';
+            }
+            var ctrl = ctrlOrName;
+            var skip = false;
+            var ctrlName = '';
+            if (typeof ctrlOrName === 'string') { // it is already a string.
+                skip = false;// do nothing
+            } else if (typeof ctrlOrName === 'function') {
+                skip = true;
+            } else {
+                ctrlOrName = response.match(this.controllerPattern)[1];// pick it off of the html ng:controller
+            }
+            if (!skip) {
+                var parts = ctrlOrName.split('.');
+                ctrlName = parts[parts.length - 1];
+                //        response = response.replace(/^\s?&lt;(\w+\s?)/i, '&lt;$1 class="' + ctrlName + '"');
+                var ref = window;
+                while (ref && parts.length) {
+                    ref = ref[parts.shift()];
+                }
+                ctrl = ref;
+            }
+            response = response.replace(this.controllerPattern, '');
+            return {controller:ctrl, template:response, ctrlName:ctrlName};
+        },
+
+        hasAllParents: function(route, hierarchy) {
+            var i, iLen;
+            for (i = 0, iLen = hierarchy.length; i &lt; iLen; i+=1) {
+                if(!route.hasOwnProperty(hierarchy[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+
+    ui.multiRoute.MultiViewUtil = new MultiViewUtil();
+
+    /*************************************************************************************************
+     * The directive logic for the multiViews
+     * @type {ui.multiRoute.MultiViewUtil}
+     * @private
+     ************************************************************************************************/
+    ui.multiRoute.MultiRouteView = function MultiRouteView(scope, element, attr, $http, $multiRoute, $compile, $controller) {
+        this.init.apply(this, arguments);
+        return this;
+    };
+    ui.multiRoute.MultiRouteView.prototype = {
+        multiViewRoots: null,
+        lastEl: null,
+        onloadExp: null,
+        initialized: null,
+        transition: null,
+        targetId: null,
+        hierarchy: null,
+        multiview: null,
+        el: null,
+        onChangeBind: null,
+
+        // args
+        scope: null,
+        element: null,
+        attr: null,
+        $http: null,
+        $multiRoute: null,
+        $compile: null,
+        $controller: null,
+
+        init: function(scope, element, attr, $http, $multiRoute, $compile, $controller) {
+            this.scope = scope;
+            this.element = element;
+            this.attr = attr;
+            this.$http = $http;
+            this.$multiRoute = $multiRoute;
+            this.$compile = $compile;
+            this.$controller = $controller;
+
+            this.onloadExp = attr.onload || '';
+            this._fetchTransitioningFromAttributes();
+            this._fetchTargetFromAttributes();
+            this.onChangeBind = this.onChange.bind(this);
+            scope.$on(ui.multiRoute.events.CHANGE, this.onChangeBind);
+            this.$http = $http;
+            this.$multiRoute = $multiRoute;
+            this.$compile = $compile;
+            this.$controller = $controller;
+            this.multiViewRoots = [];
+            // this must be called here or sub multiViews will no read after the parent loads because they miss
+            // hte event.
+            this.onChange();
+        },
+
+        _fetchTransitioningFromAttributes: function() {
+            if(this.attr.transition) {
+                var result = this.scope.$eval(this.attr.transition);
+                if(result !== undefined) {
+                    this.attr.transition = result;
+                }
+            }
+            this.transition = (this.element.transition && this.attr.transition) || null;
+        },
+
+        _fetchTargetFromAttributes: function() {
+            if (!this.attr.hasOwnProperty('target') && !this.attr.hasOwnProperty(MULTIVIEW_NODE)) {
+                throw new Error(MULTIVIEW_NODE + ' requires a unique target value');
+            }
+            this.targetId = this.attr.hasOwnProperty(MULTIVIEW_NODE) ? this.attr[MULTIVIEW_NODE] : this.attr.target;
+        },
+
+        /**
+         * @fires ui.multiRoute.events#MultiRouteViewReady
+         */
+        ready: function() {
+            var currentScope = this.el.scope(),
+                currentPath,
+                previous,
+                prevPath;
+            if(currentScope) {
+                currentScope._multiRoute.routeQueueItem.setPartialPathStatus(currentScope._multiRoute.routePart, ui.multiRoute.routeStatus.READY);
+                currentScope.$emit(ui.multiRoute.events.VIEW_READY);
+                if(!currentScope.$$phase) {
+                    currentScope.$apply();
+                }
+                if(currentScope._multiRoute.routeQueueItem.getStatus() === ui.multiRoute.routeStatus.READY) {
+                    currentPath = this.$multiRoute.parser.pathToGroupPath(currentScope._multiRoute.routeQueueItem.pathWithUrlParams, this.$multiRoute.groups);
+                    previous = this.$multiRoute.getHistoryByDelta(-1);
+                    prevPath = this.$multiRoute.parser.pathToGroupPath(previous && previous.pathWithUrlParams, this.$multiRoute.groups);
+                    currentScope.$root.$broadcast('$routeChangeSuccess', currentPath, prevPath);
+                }
+            }
+        },
+
+        onComplete: function(destroyElement) {
+            if (this.attr.hasOwnProperty('ontransition')) {
+                var s = this.el.scope();
+                s.$eval(this.attr.ontransition);
+            }
+            if(!destroyElement) {
+                this.ready();
+            }
+        },
+
+        destroyScope: function(scopeToDestroy, el) {
+            if(scopeToDestroy) {
+                this.patchSiblingChain(scopeToDestroy.$parent, scopeToDestroy.$parent.$$childTail);
+                scopeToDestroy.$destroy();
+                scopeToDestroy.destroyed = true;
+            }
+            if(el) {
+                el.remove();
+            }
+        },
+
+        destroyLastScope: function() {
+            if (this.lastEl) {
+                this.destroyScope(this.lastEl.scope(), this.lastEl);
+            }
+
+            var children = this.element.children();
+            if(!this.transition && children.length > 1) {
+                var el = $(children[0]);
+                var scope = el.scope();
+                this.destroyScope(el, scope);
+            }
+            if(!children.length) {
+                this.element.css({display:'none'});
+            }
+        },
+
+        clearContent: function() {
+            var children;
+            this.destroyLastScope();
+            children = this.element.children();
+            if (children.length) {
+                this.clearElement(children);
+            }
+        },
+
+        clearElement: function(el) {
+            if(this.transition) {
+                // when transtion is completed. destroy should be called.
+                el.transOut(true);
+            } else if(el.length) {
+                this.element.empty();
+            }
+        },
+
+        /**
+         * Get an array representation of the ids in the scope. mosty for debugging output.
+         * @param scope
+         * @return {Array}
+         */
+        getScopeChainIds: function(scope) {
+            var result = [];
+            while(scope) {
+                result.unshift(scope.$id);
+                scope = scope.$parent;
+            }
+            return result;
+        },
+
+        // get siblings in the right order. first to last.
+        // even if reversLookupDirection it will give them back first to last.
+        getAllSiblings: function(scope, reversLookupDirection) {
+            var result = [];
+            var props;
+            if(reversLookupDirection) {
+                props = {
+                    start:'$$childTail',
+                    increment:'$$prevSibling',
+                    attach: 'unshift'
+                };
+            } else {
+                props = {
+                    start:'$$childHead',
+                    increment:'$$nextSibling',
+                    attach: 'push'
+                };
+            }
+            var sibling = scope[props.start]; // head or tail
+            while(sibling) {
+                result[props.attach](sibling);// push or unshift
+                if(!sibling[props.increment]) { // prev or next
+                    break;
+                }
+                sibling = sibling[props.increment];// prev or next
+            }
+            return result;
+        },
+
+        validateSiblingChain: function(scope, targetSibling) {
+            // run a check. After currentScope is created. We should be able to take scope.$$childHead
+            // and follow $$nextSibling all of the way to our currentScope.
+            // if it doesn't happen. We have an error.
+            var sibling = scope.$$childHead;
+            while(sibling) {
+                if(sibling.$id === targetSibling.$id) {
+                    return true;
+                }
+                if(!sibling.$$nextSibling) {
+                    log('siblingCheck FAIL for', this.getScopeChainIds(sibling).join(','));
+                }
+                sibling = sibling.$$nextSibling;
+            }
+            return false;
+        },
+
+        patchSiblingChain: function(scope, targetSiblingScope) {
+            // run a check. After currentScope is created. We should be able to take scope.$$childHead
+            // and follow $$nextSibling all of the way to our targetSiblingScope.
+            // if it doesn't happen. We know we have a break in the chain.
+            // move backwards till we find a previous that doesn't have a next and set it's next to
+            // it's the item called previous on.
+            if(!this.validateSiblingChain(scope, targetSiblingScope)) {
+                var siblingsReverse = this.getAllSiblings(scope, true);
+                var index;
+                for(index = siblingsReverse.length-1; index >=0; index-=1) {
+                    var reverseSibling = siblingsReverse[index];
+                    if(reverseSibling.$$prevSibling && !reverseSibling.$$prevSibling.$$nextSibling) {
+                        reverseSibling.$$prevSibling.$$nextSibling = reverseSibling;
+                    }
+                }
+            } // else it was valid so no patch needed.
+        },
+
+        _updateHierarchy: function() {
+            var index;
+            this.hierarchy = this.hierarchy || ui.multiRoute.MultiViewUtil.getHierarchy(this.element);
+            if (this.hierarchy.length === 0 && !this.scope._multiView) { // it is a root level ui-multiview
+                index = this.multiViewRoots.indexOf(this.element[0]);
+                if(index === -1) {
+                    this.multiViewRoots.push(this.element[0]);
+                }
+                index = this.multiViewRoots.indexOf(this.element[0]);
+                this.scope._multiView = {_index:index};
+            }
+            this.multiview = this.scope._multiView;
+        },
+
+        _getRouteData: function() {
+            var route;
+            if(this.$multiRoute.routes && ui.multiRoute.MultiViewUtil) {
+                var props = {_index:true, _order:true}, k, klen, i, ilen;
+                for (k = 0, klen = this.$multiRoute.routes.length; k &lt; klen; k+=1) {
+                    var mr = this.$multiRoute.routes[k];
+                    if(mr.hasOwnProperty(this.targetId) && ui.multiRoute.MultiViewUtil.hasAllParents(mr, this.hierarchy)) {
+                        route = mr;
+                        break;
+                    }
+                }
+                if(route) {
+                    for (i = 0, ilen = route._order.length; i &lt; ilen; i+=1) {
+                        var prop = route._order[i];
+                        props[prop] = true;
+                    }
+                    ng.extend(this.multiview, this.$multiRoute.routes[this.multiview._index]);
+                    for (i in this.multiview) {
+                        if (this.multiview.hasOwnProperty(i) && !props.hasOwnProperty(i)) {
+                            delete this.multiview[i];
+                        }
+                    }
+                    route = route[this.targetId];
+                }
+            }
+            return route;
+        },
+
+        onChange: function(event) {
+            this._updateHierarchy();
+            var routePart = this._getRouteData();
+            // if route is a string. Then it was just the value in the url. only if it is a registered target do we do anything.
+            if (routePart && typeof routePart !== "string" && routePart.hasOwnProperty('alias')) {
+                if (this._isRouteANewRoute(routePart)) {
+                    this._handleNewRoute(routePart);
+                } else if (!routePart) {
+                    this.lastRoute = null;
+                    this.clearContent();
+                } else if(routePart.alias === this.lastRoute.alias && routePart.endOfPath && this.lastRouteQueueItem.getStatus() === ui.multiRoute.routeStatus.READY) {
+                    this._updateViewParamsWhenUrlDidNotChange(routePart);
+                }
+            } else {
+                this.lastRoute = null;
+                this.clearContent();
+            }
+        },
+
+        _isRouteANewRoute: function(routePart) {
+            if (!(this.lastRoute) || routePart.alias !== this.lastRoute.alias) {
+                return true;
+            } else if(routePart.endOfPath && this.lastRoute && routePart.alias === this.lastRoute.alias && routePart.transitionOnParamsOnlyChange) {
+                if(this.$multiRoute.getQueueItem().urlParamsStr !== this.lastRouteQueueItem.urlParamsStr) {
+                    // this needs to make sure it only get in here when it is that alias,
+                    // otherwise it will recreate the parent views as the child transitions.
+                    return true;
+                }
+            }
+            return false;
+        },
+
+        _handleNewRoute: function(routePart) {
+            var currentScope,
+                ary,
+                self = this,
+                routeQueueItem = this.$multiRoute.getQueueItem();
+            routeQueueItem.setPartialPathStatus(routePart, ui.multiRoute.routeStatus.LOADING);
+
+            this.element.css({display:'block'});
+            this.lastRoute = routePart;
+            this.lastRouteQueueItem = routeQueueItem;
+            ary = [routePart.template];
+            currentScope = this.scope;
+
+            if (routePart.preloads) {
+                ary = routePart.preloads.splice(0, routePart.preloads.length);
+                ary.push(routePart.template);
+            }
+            ary.push(function() {
+                self._loadView(routePart, routeQueueItem);
+            });
+            ary.push({scope:currentScope, queue:true});
+            ldr.load.apply(ldr, ary);
+        },
+
+        _updateViewParamsWhenUrlDidNotChange: function(routePart) {
+            // it is the current one. Set it to Ready.
+            var routeQueueItem = this.$multiRoute.getQueueItem(),
+                view = $(this.element.children()[0]),
+                viewScope = view.scope();
+            viewScope.urlParams = routeQueueItem.urlParams;
+            viewScope.params = routeQueueItem.params;
+            viewScope._multiRoute.routePart = routePart;
+            routeQueueItem.transferCallbacks(viewScope._multiRoute.routeQueueItem);
+            viewScope._multiRoute.routeQueueItem = routeQueueItem;
+            viewScope.$emit(ui.multiRoute.events.PARAMS_CHANGE);
+            routeQueueItem.setPartialPathStatus(routePart, ui.multiRoute.routeStatus.READY);
+        },
+
+        _loadView: function(routePart, routeQueueItem) {
+            var data = ui.multiRoute.MultiViewUtil.getCtrlClass(routePart.controller, routePart.template),
+                el,
+                children,
+                options,
+                self = this,
+                currentScope,
+                scopeRouteData = {};
+            // replace comments in the file before using it. because comments still show as nodes in the selectors.
+            data.template = data.template.replace(ui.multiRoute.MultiViewUtil.commentTags, '');
+            currentScope = this.scope.$new();
+            currentScope.urlParams = routeQueueItem.urlParams;
+            currentScope.params = routeQueueItem.params;
+            currentScope._multiRoute = scopeRouteData;
+            scopeRouteData.routePart = routePart;
+            scopeRouteData.routeQueueItem = routeQueueItem;
+            currentScope.$emit(ui.multiRoute.events.PARAMS_CHANGE);
+            scopeRouteData.routeQueueItem.setPartialPathStatus(scopeRouteData.routePart, ui.multiRoute.routeStatus.LOADED);
+
+            if (routePart.controller) {
+                this.$controller(routePart.controller, {$scope:currentScope});
+            }
+            el = this.$compile(data.template)(currentScope);
+            this.lastEl = this.el;
+            this.el = el;
+
+            if(routePart['class']) {
+                el.addClass(routePart['class']);
+            }
+            if(el.length !== 1) {
+                throw new Error(MULTIVIEW_NODE +" must have exactly one top level node. Found " + el.length+" in "+routePart.template);
+            }
+            this.element.append(el);
+
+            currentScope.$emit('$viewContentLoaded');
+            currentScope.$eval(this.onloadExp);
+            if (this.transition) {
+                scopeRouteData.routeQueueItem.setPartialPathStatus(scopeRouteData.routePart, ui.multiRoute.routeStatus.ENTERING);
+                children = this.element.children();
+                options = {
+                    name: routePart.transitionOnParamsOnlyChange ? routePart.alias + '?' + routeQueueItem.urlParamsStr : routePart.alias,
+                    group: this.targetId,
+                    type: this.transition,
+                    show: this.attr.show && currentScope.hasOwnProperty(this.attr.show) && typeof currentScope[this.attr.show] === 'function' ? currentScope[this.attr.show] : null,
+                    hide: this.attr.hide && currentScope.hasOwnProperty(this.attr.hide) && typeof currentScope[this.attr.hide] === 'function' ? currentScope[this.attr.hide] : null,
+                    onTransition: function(el, options, destroy) {
+                        self.onComplete(destroy ? el : null);
+                    },
+                    duration: this.attr.duration || ui.multiRoute.config.TRANSITION_TIME,
+                    destroy: function () {
+                        self.destroyScope(currentScope, el);
+                    }
+                };
+                el.transition(options);
+                // make transition out happen before transition in.
+                if (children.length > 1) {
+                    $(children[0]).transOut();
+                }
+                if (!this.initialized) {
+                    this.initialized = true;
+                    if (this.attr.animatefirst === 'true') {
+                        el.transIn();
+                    } else {
+                        this.onComplete();
+                    }
+                } else {
+                    el.transIn(children.length === 1 ? false : undefined);
+                }
+            } else {
+                this.destroyLastScope();
+            }
+            currentScope.$digest();
+
+            if(!this.transition) {
+                this.ready();
+            }
+        }
+    };
+
+    /**
+     * @type {Query}
+     * @constructor
+     */
+    function Query() {
+        var unique_keys = {}; // for avoiding recursion when toString()
+        this.getURL = function () { // get url and parseIt
+            var str = document.location.href;
+            var spobj = {};
+            var sp = str.split('?');
+            spobj.url = sp[0];
+            spobj.query = this.parse(sp[1]);
+            return spobj;
+        };
+
+        this.parse = function (vars, chr) {
+            // parese query string into variable object and return it
+            var obj = {};
+            chr = chr || '&';
+            vars = vars.toString().trim();
+            var v = vars.split(chr);
+            var i, ilen;
+            for (i = 0, ilen = v.length; i &lt; ilen; i += 1) {
+                v[i] = v[i].toString().split('=');
+                var tmp = v[i][0].toString().split('[');
+                if (tmp.length > 1) {
+                    var keys, j;
+                    if (obj[tmp[0]] === undefined) {
+                        obj[tmp[0]] = {};
+                    }
+                    keys = v[i][0].toString().split('[');
+                    keys = keys.splice(1, keys.length - 1);
+                    for (j in keys) {
+                        if (keys.hasOwnProperty(j)) {
+                            keys[j] = keys[j].toString().replace(']', '');
+                        }
+                    }
+                    obj[tmp[0]] = this._addKV(obj[tmp[0]], keys, v[i][1]);
+                } else {
+                    if (v[i][0]) {
+                        obj[v[i][0]] = decodeURIComponent(v[i][1]);
+                    }
+                }
+            }
+            return obj;
+        };
+
+        /**
+         * Internal function used for converting a query string that is complex to a deep object.
+         * @param obj
+         * @param keys
+         * @param val
+         * @return {*}
+         * @private
+         */
+        this._addKV = function (obj,keys, val) {
+            // add sub child objects recursively
+            if (keys.length > 1) {
+                if (!obj[keys[0]]) {
+                    obj[keys[0]] = {};
+                }
+                obj[keys[0]] = this._addKV(obj[keys[0]], keys.splice(1, keys.length - 1), val);
+            } else {
+                val = unescape(val);
+                if (!isNaN(val)) {
+                    val = parseFloat(val);
+                    val = isNaN(val) ? 0 : val;
+                } else if (val.toLowerCase() == 'true') {
+                    val = true;
+                } else if (val.toLowerCase() == 'false') {
+                    val = false;
+                }
+                obj[keys[0]] = val;
+            }
+            return obj;
+        };
+
+        this.objectToQuery = function (obj, name) {
+            // make a query string
+            // this will remove all functions that are in the object
+            // since only simple objects can be passed.
+            var str = '', i;
+            for (i in obj) {
+                if (typeof(obj[i]) !== 'function') {
+                    if (typeof(obj[i]) === 'object' || typeof(obj[i]) === 'array') {
+                        if (!name) { // single dimentional
+                            str += this.objectToQuery(obj[i], i);
+                        } else { // multi dimentional
+                            str += this.objectToQuery(obj[i], name + '[' + i + ']');
+                        }
+                    } else if (name) {
+                        str += name + '[' + i + ']=' + encodeURIComponent(obj[i]) + '&';
+                    } else {
+                        str += i + '=' + encodeURIComponent(obj[i]) + '&';
+                    }
+                }
+            }
+            if (str && str.length && str.charAt(str.length - 1) === '&') {
+                str = str.substr(0, str.length - 1);
+            }
+            return str;
+        };
+    }
+
+    ui.query = ui.query || {};
+    ui.query.QueryUtil = new Query();
+
+    /*************************************************************************************************
+     * Define the module to load multiRoute
+     * @type {module}
+     ************************************************************************************************/
+    var module = angular.module('ui.multiRoute', []),
+        multiRoute; // variable to setup the singleton.
+
+    multiRoute = new ui.multiRoute.MultiRoute();
+    // this is to override the route params of angular for multiRoute so they can still be used.
+    module.provider('$routeParams', function () {
+        return {
+            $get: function() {
+                return multiRoute.routes;
+            }
+        };
+    });
+    /**
+     * Create injection for $multiRoute
+     * give access to it's dependencies.
+     */
+    module.service('$multiRoute', ['$rootScope', '$location', '$routeParams', function ($rootScope, $location, $routeParams) {
+        if (!multiRoute.$location) {
+            multiRoute.$rootScope = $rootScope;
+            multiRoute.$location = $location;
+            multiRoute.$routePrams = $routeParams;
+            multiRoute.setup();
+        }
+        return multiRoute;
+    }]);
+
+    /**
+     * ui-multiview allow multiple nested views. However, each view must have a unique target id.
+     * this uses the jquery.transition.js
+     */
+    module.directive('uiMultiview', ['$http', '$multiRoute', '$compile', '$controller', function ($http, $multiRoute, $compile, $controller) {
+        return {
+            restrict:'EAC',
+            link: function(scope, element, attr) {
+                var multiView = new ui.multiRoute.MultiRouteView(scope, element, attr, $http, $multiRoute, $compile, $controller);
+            }
+        };
+    }]);
+
+    //TODO: these items below still need to be refactored into readable and testable units.
+
+    function createScope(element, template, scope, $compile, $controller, controller, classes, params) {
+        var el = ng.element(template);
+        var link = $compile(el);
+        if(classes){
+            el.addClass(classes);
+        }
+        element.append(el);
+        var currentScope = scope.$new();
+
+        currentScope.params = params;
+        if (controller) {
+            $controller(controller, {$scope:currentScope});
+        }
+        link(currentScope);
+        return el;
+    }
+
+    /*************************************************************************************************
+     * Popups that use the same caching and aliases as multiRoute.
+     ************************************************************************************************/
+    module.directive("uiPopup", ['$multiRoute', '$compile', '$controller', function ($multiRoute, $compile, $controller) {
+        return {
+            restrict:'EAC',
+            link:function (scope, element, attr) {
+                scope.$on('popup', function (evt, type, alias, params, transition) {
+
+                    var reg;
+
+                    function onComplete(el, options) {
+                        if (attr.hasOwnProperty('ontransition')) {
+                            var s = el.scope();
+                            s.$eval(attr.ontransition);
+                        }
+                    }
+
+                    if (type === 'alert') {
+                        alert(params && params.hasOwnProperty('value') ? params.value : params);
+                    } else if (type === 'dialog') {
+                        var onLoadExp = attr.onload || '';
+                        reg = $multiRoute.get(alias);
+                        if (reg && reg.template) {
+                            var ary = [reg.template];
+                            if (reg.preloads) {
+                                ary = reg.preloads.splice(0, reg.preloads.length);
+                                ary.push(reg.template);
+                            }
+                            ary.push(function () {
+                                var data = ui.multiRoute.MultiViewUtil.getCtrlClass(reg.controller, reg.template);
+                                data.template = data.template.replace(ui.multiRoute.MultiViewUtil.commentTags, '');
+                                var el = createScope(element, data.template, scope, $compile, $controller, reg.controller, reg['class'], params);
+                                var currentScope = el.scope();
+                                currentScope.$emit('$viewContentLoaded');
+                                currentScope.$eval(onLoadExp);
+
+                                function destroyPopup() {
+                                    currentScope.$emit('close');
+                                    currentScope.$destroy();
+                                    el.close(); // must call this!
+                                    if(!scope.$$phase) {
+                                        scope.$apply();
+                                    }
+                                }
+
+                                var modalBase = {
+                                    appendTo:element[0],
+                                    onClose:function () {
+                                        if (transition) {
+                                            el.transOut();
+                                            el.parent().children('.popupModal.'+el.attr('id')).addClass('fadeOut');
+                                            return true;
+                                        } else {
+                                            destroyPopup();
+                                        }
+                                        return false;
+                                    }
+                                };
+                                // if it has modal params. launch the simple modal with those params.
+                                if(params) {
+                                    ng.extend(modalBase, params);
+                                }
+                                el.popup(modalBase);
+                                if (transition) {
+                                    var options = {
+                                        name:alias,
+                                        group:'popup',
+                                        type:transition,
+                                        show:attr.show && currentScope.hasOwnProperty(attr.show) && typeof currentScope[attr.show] === 'function' ? currentScope[attr.show] : null,
+                                        hide:attr.hide && currentScope.hasOwnProperty(attr.hide) && typeof currentScope[attr.hide] === 'function' ? currentScope[attr.hide] : null,
+                                        onTransition:onComplete,
+                                        duration: attr.duration ? parseInt(attr.duration, 10) : 1000,
+                                        destroy:function () {
+                                            destroyPopup();
+                                        }
+                                    };
+                                    el.transition(options);
+                                    el.transIn();
+                                    el.parent().children('.popupModal.'+el.attr('id')).addClass('fadeIn');
+                                }
+                                currentScope.$digest();// apply does a digest from the root level.
+                            });
+                            ary.push({scope:scope});
+                            ldr.load.apply(ldr, ary);
+                        }
+                    } else if(!reg) {
+                        throw new Error('[uiPopup] unable to find alias for '+alias+' in popup');
+                    }
+                });
+            }
+        };
+    }]);
+
+    /**
+     * do an include that uses the multiRoutes.
+     */
+    module.directive('uiInclude', ['$compile', '$controller', function ($compile, $controller) {
+        return {
+            restrict:'EAC',
+            link:function (scope, element, attr) {
+                // for a controller in this use data-ng-controller
+                var clearContent = function () {
+                    element.empty();
+                };
+
+                scope.$watch(attr.src, function() {
+                    var url = scope.$eval(attr.src);
+                    if(url) {
+                        ldr.load(url, function () {
+                            var html = ldr.cache(url),
+                                el;
+                            if(attr.uiInclude) { // will create a new scope if uiInclude has a controller.
+                                el = createScope(element, html, scope, $compile, $controller, attr.uiInclude);
+                                var s = el.scope();
+                                if(!s.$$phase) {
+                                    s.$digest();
+                                }
+                                s.$emit('$viewContentLoaded');
+                                s.$eval(attr.onload);
+                            } else {
+                                el = $compile(html)(scope);
+                                if(el.length) {
+                                    // allow replacement of element if requested. So it is as if it was part of the
+                                    // original template.
+                                    attr.replace ? element.replaceWith(el) : element.html(el);
+                                    if(!scope.$$phase) {
+                                        scope.$digest();
+                                    }
+                                    scope.$emit('$viewContentLoaded');
+                                    scope.$eval(attr.onload);
+                                } else if(html) {
+                                    throw new Error("uiInclude invalid HTML string. Must contain a top level html node.");
+                                }
+                            }
+
+                        }, {scope:scope});
+                    }
+                });
+            }
+        };
+    }]);
+}(angular, loader));</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Index</a></h2><h3>Modules</h3><ul><li><a href="4a4d6b9648.html">config</a></li></ul><h3>Classes</h3><ul><li><a href="MultiRoute.html">MultiRoute</a></li></ul><h3>Global</h3><ul><li><a href="global.html#events">events</a></li><li><a href="global.html#routeStatus">routeStatus</a></li><li><a href="global.html#VERSION">VERSION</a></li></ul>
+</nav>
+
+<br clear="both">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.2.0-dev</a> on Wed Feb 20 2013 07:56:29 GMT-0700 (MST)
+</footer>
+
+<script> prettyPrint(); </script>
+</body>
+</html>

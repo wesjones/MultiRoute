@@ -1,0 +1,157 @@
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0px;
+    padding: 0px;
+    font-family: Arial;
+}
+
+.links {
+    width: 200px;
+    border: 1px solid #999999;
+}
+
+.link {
+    font-size: 10px;
+}
+
+.link.selected {
+    color: #FF0000;
+}
+
+.version, .path, .params {
+    position: relative;
+    left: 0px;
+    right: 0px;
+    width: 500px;
+    height: auto;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.path { font-weight: normal; }
+.params { font-weight: normal; }
+.path:nth-child(1), .params:nth-child(1) { font-weight: bold; }
+.params > pre {
+    margin-left: 20px;
+    width: 200px;
+    height: 400px;
+    overflow: auto;
+}
+
+.viewport {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    right: 0px;
+    bottom: 0px;
+    margin: auto;
+    width: 500px;
+    height: 400px;
+}
+
+.button {
+    background-color: #CCCCCC;
+    width: 100px;
+    height: 20px;
+    text-align: center;
+    border: 1px solid #000000;
+}
+
+.view-A {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 0, 0, 0.25);
+}
+
+.view-B {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 255, 0, 0.25);
+}
+
+.view-C {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 255, 0.25);
+}
+
+.view-D {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 0, 0.25);
+}
+
+.header {
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    right: 0px;
+    margin: auto;
+    width: 200px;
+    height: 100px;
+}
+
+.content {
+    position: absolute;
+    top: 100px;
+    left: 0px;
+    right: 0px;
+    margin: auto;
+    width: 200px;
+    height: 300px;
+}
+
+.body {
+    position: absolute;
+    top: 100px;
+    left: 0px;
+    right: 0px;
+    margin: auto;
+    width: 200px;
+    height: 200px;
+}
+
+.content .body {
+    top: 0px;
+}
+
+.footer {
+    position: absolute;
+    left: 0px;
+    right: 0px;
+    bottom: 0px;
+    margin: auto;
+    width: 200px;
+    height: 100px;
+}
+
+.header > div, .content > div, .body > div, .footer > div {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+}
+
+.HA { background-color: rgba(255, 0, 0, 0.25); }
+.HB { background-color: rgba(0, 255, 0, 0.25); }
+.HC { background-color: rgba(0, 0, 255, 0.25); }
+.HD { background-color: rgba(255, 255, 0, 0.25); }
+
+.CA { background-color: rgba(255, 0, 0, 0.25); }
+.CB { background-color: rgba(0, 255, 0, 0.25); }
+.CC { background-color: rgba(0, 0, 255, 0.25); }
+.CD { background-color: rgba(255, 255, 0, 0.25); }
+
+.BA { background-color: rgba(255, 0, 0, 0.25); }
+.BB { background-color: rgba(0, 255, 0, 0.25); }
+.BC { background-color: rgba(0, 0, 255, 0.25); }
+.BD { background-color: rgba(255, 255, 0, 0.25); }
+
+.FA { background-color: rgba(255, 0, 0, 0.25); }
+.FB { background-color: rgba(0, 255, 0, 0.25); }
+.FC { background-color: rgba(0, 0, 255, 0.25); }
+.FD { background-color: rgba(255, 255, 0, 0.25); }

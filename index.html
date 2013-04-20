@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html data-ng-app="mr" data-ng-controller="Root" xmlns="http://www.w3.org/1999/html">
+<head>
+    <title>{{title}}</title>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8">
+    <meta name="apple-mobile-web-app-capable" content="YES">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <style type="text/css">
+        @import url("lib/multiRoute/MultiRoute-0.1.1.transition.css");
+        @import url("css/app.css");
+    </style>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.0.6/angular.min.js"></script>
+    <script src="lib/multiRoute/loader.js"></script>
+    <script src="lib/multiRoute/jquery.popup.js"></script>
+    <script src="lib/multiRoute/MultiRoute-0.1.1.transition.js"></script>
+    <script src="lib/multiRoute/MultiRoute-0.1.1.js"></script>
+    <script src="js/controllers.js"></script>
+    <script src="js/app.js"></script>
+</head>
+<body data-ui-duration="350" >
+<a href="docs/">MultiRoute Docs</a><br/>
+<a data-ng-click="start()">Click to run all Paths.</a>
+<div class="links">
+    <div class="linkWrapper" data-ng-repeat="pathItem in paths">
+        <a data-ng-click="go(pathItem)" class="link {{getPathClass(pathItem)}}">[ {{$index}} ] - {{pathItem.path}} {{pathItem.urlParams}}</a>
+    </div>
+</div>
+<div data-ui-multiview data-target="page" data-transition="slide" class="viewport"></div>
+</body>
+</html>

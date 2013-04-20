@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Global</title>
+    
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+    
+    <h1 class="page-title">Global</h1>
+    
+    
+
+
+
+<section>
+    
+<header>
+    <h2>
+    
+    </h2>
+    
+</header>  
+
+<article>
+    <div class="container-overview">
+    
+    
+    
+        
+        
+        
+<dl class="details">
+    
+        
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+</dl>
+
+        
+        
+    
+    </div>
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+        <h3 class="subsection-title">Members</h3>
+        
+        <dl>
+            
+<dt>
+    <h4 class="name" id="events"><span class="type-signature">&lt;readonly> </span>events<span class="type-signature"> :String</span></h4>
+    
+    
+</dt>
+<dd>
+    
+    <div class="description">
+        Events that MultiRoute will emit from the view that is performing the action.
+    </div>
+    
+    
+    
+<dl class="details">
+    
+        
+        <h5 class="subsection-title">Properties:</h5>
+        
+        <dl>
+
+<table class="props">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		
+		
+		<th>Default</th>
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>CHANGE</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    MultiRouteChange
+                
+                </td>
+            
+            
+            <td class="description last">When the route has been changed in the url and is starting its loadingand resolving. This will send back the currentPath and the previousPath</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>BEFORE_CHANGE</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    MultiRouteBeforeChange
+                
+                </td>
+            
+            
+            <td class="description last">Before the change happens. This is just before a route gets activated to beset for change. This will send back the currentPath and the nextPath</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>ROUTE_COMPLETE</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    MultiRouteQueueManagerRouteReady
+                
+                </td>
+            
+            
+            <td class="description last">As each route completes this is dispatched from the view it completed in.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>PARAMS_CHANGE</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    MultiRouteParamsChange
+                
+                </td>
+            
+            
+            <td class="description last">When the search params in the url change but the views have not, this will dispatchso that the views can fire their VIEW_READY event after these have been applied.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>VIEW_READY</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    MultiRouteViewReady
+                
+                </td>
+            
+            
+            <td class="description last">After the view is ready, as in loaded, resolved, and transition is completed.</td>
+        </tr>
+	
+	
+	</tbody>
+</table></dl>
+        
+    
+        
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="MultiRoute-0.1.1.js.html">MultiRoute-0.1.1.js</a>, line 107
+    </li></ul></dd>
+    
+    
+    
+    
+    
+    
+    
+</dl>
+
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="routeStatus"><span class="type-signature">&lt;readonly> </span>routeStatus<span class="type-signature"> :Number</span></h4>
+    
+    
+</dt>
+<dd>
+    
+    <div class="description">
+        The status phases that each path passed to the multiRoute will go through before the nextpath is able to begin it's phase cycle.
+    </div>
+    
+    
+    
+<dl class="details">
+    
+        
+        <h5 class="subsection-title">Properties:</h5>
+        
+        <dl>
+
+<table class="props">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		
+		
+		<th>Default</th>
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>WAITING</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    1
+                
+                </td>
+            
+            
+            <td class="description last">Status of a path that is waiting in queue.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>LOADING</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    2
+                
+                </td>
+            
+            
+            <td class="description last">The status of path that is in loading its dependencies.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>LOADED</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    3
+                
+                </td>
+            
+            
+            <td class="description last">The status of a path that has loaded it's dependencies.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>ENTERING</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    4
+                
+                </td>
+            
+            
+            <td class="description last">The status of a path that is currently transitioning into view.</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>READY</code></td>
+            
+            
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+            
+            </td>
+            
+            
+            
+            
+                <td class="default">
+                
+                    5
+                
+                </td>
+            
+            
+            <td class="description last">The status of a path that has finished all transitions.</td>
+        </tr>
+	
+	
+	</tbody>
+</table></dl>
+        
+    
+        
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="MultiRoute-0.1.1.js.html">MultiRoute-0.1.1.js</a>, line 139
+    </li></ul></dd>
+    
+    
+    
+    
+    
+    
+    
+</dl>
+
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="VERSION"><span class="type-signature">&lt;constant> </span>VERSION<span class="type-signature"> :String</span></h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    
+<dl class="details">
+    
+        
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="MultiRoute-0.1.1.js.html">MultiRoute-0.1.1.js</a>, line 72
+    </li></ul></dd>
+    
+    
+    
+    
+    
+    
+    
+</dl>
+
+    
+    
+</dd>
+
+        </dl>
+    
+    
+    
+    
+    
+    
+    
+</article>
+
+</section>  
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Index</a></h2><h3>Modules</h3><ul><li><a href="4a4d6b9648.html">config</a></li></ul><h3>Classes</h3><ul><li><a href="MultiRoute.html">MultiRoute</a></li></ul><h3>Global</h3><ul><li><a href="global.html#events">events</a></li><li><a href="global.html#routeStatus">routeStatus</a></li><li><a href="global.html#VERSION">VERSION</a></li></ul>
+</nav>
+
+<br clear="both">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.2.0-dev</a> on Wed Feb 20 2013 07:56:29 GMT-0700 (MST)
+</footer>
+
+<script> prettyPrint(); </script>
+</body>
+</html>
